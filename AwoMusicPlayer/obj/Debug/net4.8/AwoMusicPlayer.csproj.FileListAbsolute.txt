@@ -1,0 +1,12 @@
+C:\Users\david\Desktop\Awooochy programs\AwoMusicPlayer\AwoMusicPlayer\AwoMusicPlayer\bin\Debug\net4.8\AwoMusicPlayer.exe.config
+C:\Users\david\Desktop\Awooochy programs\AwoMusicPlayer\AwoMusicPlayer\AwoMusicPlayer\bin\Debug\net4.8\AwoMusicPlayer.exe
+C:\Users\david\Desktop\Awooochy programs\AwoMusicPlayer\AwoMusicPlayer\AwoMusicPlayer\bin\Debug\net4.8\AwoMusicPlayer.pdb
+C:\Users\david\Desktop\Awooochy programs\AwoMusicPlayer\AwoMusicPlayer\AwoMusicPlayer\obj\Debug\net4.8\AwoMusicPlayer.csproj.AssemblyReference.cache
+C:\Users\david\Desktop\Awooochy programs\AwoMusicPlayer\AwoMusicPlayer\AwoMusicPlayer\obj\Debug\net4.8\AwoMusicPlayer.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\david\Desktop\Awooochy programs\AwoMusicPlayer\AwoMusicPlayer\AwoMusicPlayer\obj\Debug\net4.8\AwoMusicPlayer.AssemblyInfoInputs.cache
+C:\Users\david\Desktop\Awooochy programs\AwoMusicPlayer\AwoMusicPlayer\AwoMusicPlayer\obj\Debug\net4.8\AwoMusicPlayer.AssemblyInfo.cs
+C:\Users\david\Desktop\Awooochy programs\AwoMusicPlayer\AwoMusicPlayer\AwoMusicPlayer\obj\Debug\net4.8\AwoMusicPlayer.csproj.CoreCompileInputs.cache
+C:\Users\david\Desktop\Awooochy programs\AwoMusicPlayer\AwoMusicPlayer\AwoMusicPlayer\obj\Debug\net4.8\AwoMusicPlayer.csproj.Fody.CopyLocal.cache
+C:\Users\david\Desktop\Awooochy programs\AwoMusicPlayer\AwoMusicPlayer\AwoMusicPlayer\obj\Debug\net4.8\AwoMusicPlayer.csproj.Fody.RuntimeCopyLocal.cache
+C:\Users\david\Desktop\Awooochy programs\AwoMusicPlayer\AwoMusicPlayer\AwoMusicPlayer\obj\Debug\net4.8\AwoMusicPlayer.exe
+C:\Users\david\Desktop\Awooochy programs\AwoMusicPlayer\AwoMusicPlayer\AwoMusicPlayer\obj\Debug\net4.8\AwoMusicPlayer.pdb
