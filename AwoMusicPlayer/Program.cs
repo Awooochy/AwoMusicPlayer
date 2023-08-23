@@ -5,6 +5,8 @@ using System.Linq;
 using NAudio.Wave;
 using System.Media;
 using System.Threading;
+using System.Windows.Forms;
+
 
 namespace AwoMusicPlayer
 {
@@ -17,6 +19,11 @@ namespace AwoMusicPlayer
         static int currentVolume = 50; // Initial volume set to 50%
         static int currentSongPosition = 0;
         static bool showMusicBar = false;
+        static bool allowAutoplay = true;
+        static bool isSearcherActive = false;
+
+
+
 
         static void Main(string[] args)
         {
@@ -120,6 +127,12 @@ namespace AwoMusicPlayer
 
         static void HandleKeyPress(ConsoleKeyInfo keyInfo)
         {
+            allowAutoplay = !(keyInfo.Key == ConsoleKey.R ||
+                              keyInfo.Key == ConsoleKey.RightArrow ||
+                              keyInfo.Key == ConsoleKey.LeftArrow);
+
+            isSearcherActive = (keyInfo.Key == ConsoleKey.N);
+
             switch (keyInfo.Key)
             {
                 case ConsoleKey.R:
@@ -157,6 +170,17 @@ namespace AwoMusicPlayer
                     break;
             }
         }
+
+        static void AutoplayNextSong()
+        {
+            if (allowAutoplay && !isSearcherActive && !string.IsNullOrEmpty(currentSong))
+            {
+                SendKeys.SendWait("{Right}"); // Simulate pressing the right arrow key
+            }
+        }
+
+
+
 
         static void PlayRandomSong()
         {
@@ -296,6 +320,8 @@ namespace AwoMusicPlayer
 
             var matchingSongs = musicFiles.Where(song => Path.GetFileName(song).ToLower().Contains(searchQuery)).ToList();
 
+            isSearcherActive = true;
+
             if (matchingSongs.Count == 0)
             {
                 Console.WriteLine("No matching songs found.");
@@ -343,7 +369,17 @@ namespace AwoMusicPlayer
             audioFileReader = new AudioFileReader(filePath); // Initialize audioFileReader
             waveOutDevice = new WaveOutEvent(); // Initialize waveOutDevice
             waveOutDevice.Init(audioFileReader);
+            waveOutDevice.PlaybackStopped += WaveOutDevice_PlaybackStopped; // Subscribe to the PlaybackStopped event
             waveOutDevice.Play();
+
+        }
+
+        static void WaveOutDevice_PlaybackStopped(object sender, StoppedEventArgs e)
+        {
+            if (e.Exception == null) // Check if playback stopped without an exception
+            {
+                AutoplayNextSong(); // Trigger autoplay when playback stops
+            }
         }
 
 

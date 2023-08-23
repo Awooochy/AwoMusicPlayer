@@ -16,4 +16,14 @@
     <PackageReference Include="NAudio" Version="2.1.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Reference Include="BuildSoft.OscCore">
+      <HintPath>..\..\..\Programas custom\Blokklist nameplate project\BuildSoft.OscCore.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="vrcosclib">
+      <HintPath>..\..\..\Programas custom\Blokklist nameplate project\vrcosclib.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
 </Project>

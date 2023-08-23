@@ -10,3 +10,4 @@ C:\Users\david\Desktop\Awooochy programs\AwoMusicPlayer\AwoMusicPlayer\AwoMusicP
 C:\Users\david\Desktop\Awooochy programs\AwoMusicPlayer\AwoMusicPlayer\AwoMusicPlayer\obj\Debug\net4.8\AwoMusicPlayer.csproj.Fody.RuntimeCopyLocal.cache
 C:\Users\david\Desktop\Awooochy programs\AwoMusicPlayer\AwoMusicPlayer\AwoMusicPlayer\obj\Debug\net4.8\AwoMusicPlayer.exe
 C:\Users\david\Desktop\Awooochy programs\AwoMusicPlayer\AwoMusicPlayer\AwoMusicPlayer\obj\Debug\net4.8\AwoMusicPlayer.pdb
+C:\Users\david\Desktop\Awooochy programs\AwoMusicPlayer\AwoMusicPlayer\AwoMusicPlayer\obj\Debug\net4.8\AwoMusicPlayer.exe.config
