@@ -21,6 +21,8 @@ namespace AwoMusicPlayer
         static bool showMusicBar = false;
         static bool allowAutoplay = true;
         static bool isSearcherActive = false;
+        static bool isLoopEnabled = false;
+
 
 
 
@@ -33,6 +35,7 @@ namespace AwoMusicPlayer
             Console.WriteLine("Music Player Commands:");
             Console.WriteLine("Press 'r' or 'R' for a random song.");
             Console.WriteLine("Press 'spacebar' to pause/unpause the music.");
+            Console.WriteLine("Press 'l or L' to loop/unloop the music.");
             Console.WriteLine("Press 'right arrow' to play the next song.");
             Console.WriteLine("Press 'left arrow' to play the previous song.");
             Console.WriteLine("Press 'up arrow' to increase volume.");
@@ -77,8 +80,6 @@ namespace AwoMusicPlayer
                 {
                     string[] files = Directory.GetFiles(folder, "*.mp3")
                                              .Concat(Directory.GetFiles(folder, "*.wav"))
-                                             .Concat(Directory.GetFiles(folder, "*.ogg"))
-                                             .Concat(Directory.GetFiles(folder, "*.mid"))
                                              .ToArray();
                     musicFiles.AddRange(files);
                 }
@@ -105,7 +106,6 @@ namespace AwoMusicPlayer
                 string selectedFolder = musicFolders[choice - 1];
                 musicFiles = Directory.GetFiles(selectedFolder, "*.mp3")
                                      .Concat(Directory.GetFiles(selectedFolder, "*.wav"))
-                                     .Concat(Directory.GetFiles(selectedFolder, "*.ogg"))
                                      .Concat(Directory.GetFiles(selectedFolder, "*.mid"))
                                      .ToList();
             }
@@ -125,6 +125,7 @@ namespace AwoMusicPlayer
             }
         }
 
+
         static void HandleKeyPress(ConsoleKeyInfo keyInfo)
         {
             allowAutoplay = !(keyInfo.Key == ConsoleKey.R ||
@@ -137,6 +138,9 @@ namespace AwoMusicPlayer
             {
                 case ConsoleKey.R:
                     PlayRandomSong();
+                    break;
+                case ConsoleKey.L:
+                    ToggleLoop();
                     break;
                 case ConsoleKey.Spacebar:
                     TogglePause();
@@ -313,6 +317,12 @@ namespace AwoMusicPlayer
             }
         }
 
+        static void ToggleLoop()
+        {
+            isLoopEnabled = !isLoopEnabled;
+            Console.WriteLine(isLoopEnabled ? "Loop is enabled." : "Loop is disabled.");
+        }
+
         static void SearchByName()
         {
             Console.Write("Enter the name or letters of the song: ");
@@ -366,13 +376,29 @@ namespace AwoMusicPlayer
             currentSong = Path.GetFileName(filePath);
             Console.WriteLine($"Now playing: {currentSong}");
 
-            audioFileReader = new AudioFileReader(filePath); // Initialize audioFileReader
-            waveOutDevice = new WaveOutEvent(); // Initialize waveOutDevice
+            audioFileReader = new AudioFileReader(filePath);
+            waveOutDevice = new WaveOutEvent();
             waveOutDevice.Init(audioFileReader);
-            waveOutDevice.PlaybackStopped += WaveOutDevice_PlaybackStopped; // Subscribe to the PlaybackStopped event
-            waveOutDevice.Play();
 
+            waveOutDevice.PlaybackStopped += (sender, e) =>
+            {
+                if (e.Exception == null) // Check if playback stopped without an exception
+                {
+                    if (isLoopEnabled)
+                    {
+                        audioFileReader.Position = 0; // Rewind the song to the beginning for looping
+                        waveOutDevice.Play(); // Continue playing the song
+                    }
+                    else
+                    {
+                        AutoplayNextSong(); // Trigger autoplay when playback stops
+                    }
+                }
+            };
+
+            waveOutDevice.Play();
         }
+
 
         static void WaveOutDevice_PlaybackStopped(object sender, StoppedEventArgs e)
         {
