@@ -2,463 +2,543 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using NAudio.Wave;
-using System.Media;
-using System.Threading;
-using System.Windows.Forms;
-
+using System.Threading; // For Thread.Sleep
+// Ensure NAudio.Wave is available if WaveFormat is used directly in Program.cs for display
+// using NAudio.Wave; // Not strictly needed here if MusicPlayer formats the string
 
 namespace AwoMusicPlayer
 {
+    public static class StringExtensions
+    {
+        public static string Ellipsis(this string value, int maxLength)
+        {
+            if (string.IsNullOrEmpty(value)) return value;
+            if (maxLength <= 3) return new string('.', Math.Max(0, maxLength));
+            return value.Length <= maxLength ? value : value.Substring(0, maxLength - 3) + "...";
+        }
+    }
+
     class Program
     {
-        static List<string> musicFolders = new List<string>();
-        static List<string> musicFiles = new List<string>();
-        static string currentSong = "";
-        static bool isPaused = false;
-        static int currentVolume = 50; // Initial volume set to 50%
-        static int currentSongPosition = 0;
-        static bool showMusicBar = false;
-        static bool allowAutoplay = true;
-        static bool isSearcherActive = false;
-        static bool isLoopEnabled = false;
+        private static List<string> _configuredMusicFolders = new List<string>();
+        private static MusicPlayer _player;
+        private static bool _showMusicBar = false;
 
+        // ADDED: New state flags for different views
+        private static bool _showFullSongName = false;
+        private static bool _showSongDetailsView = false;
 
-
+        // Define approx how many lines the main content area might take before music bar
+        private const int MaxMainContentLines = 20; // Generous estimate for commands/details
 
 
         static void Main(string[] args)
         {
-            LoadMusicFolders();
-            ChooseMusicFolder();
+            Console.Title = "AwoMusicPlayer";
+            LoadConfiguredMusicFolders();
 
-            Console.WriteLine("Music Player Commands:");
-            Console.WriteLine("Press 'r' or 'R' for a random song.");
-            Console.WriteLine("Press 'spacebar' to pause/unpause the music.");
-            Console.WriteLine("Press 'l or L' to loop/unloop the music.");
-            Console.WriteLine("Press 'right arrow' to play the next song.");
-            Console.WriteLine("Press 'left arrow' to play the previous song.");
-            Console.WriteLine("Press 'up arrow' to increase volume.");
-            Console.WriteLine("Press 'down arrow' to decrease volume.");
-            Console.WriteLine("Press '1' to skip forward 10 seconds.");
-            Console.WriteLine("Press '2' to rewind 10 seconds.");
-            Console.WriteLine("Press 'n' to search for a song by name.");
-            Console.WriteLine("Press 'esc' to close the program.");
+            if (!_configuredMusicFolders.Any())
+            {
+                Console.WriteLine("No music folders configured in MusicFoldersLocation.txt or it's missing.");
+                PauseBeforeExit();
+                return;
+            }
+
+            List<string> foldersToLoad;
+            if (_configuredMusicFolders.Count > 1 || _configuredMusicFolders.Count == 0)
+            {
+                foldersToLoad = ChooseMusicFoldersFromConfig();
+            }
+            else
+            {
+                foldersToLoad = new List<string>(_configuredMusicFolders);
+                Console.WriteLine($"Automatically loading music from: {_configuredMusicFolders.First()}");
+            }
+
+            if (!foldersToLoad.Any())
+            {
+                Console.WriteLine("No folders selected for loading.");
+                PauseBeforeExit();
+                return;
+            }
+
+            _player = new MusicPlayer();
+            if (!_player.LoadMusic(foldersToLoad))
+            {
+                Console.WriteLine("No music files (.mp3, .wav) found in the selected folder(s).");
+                _player.Dispose();
+                PauseBeforeExit();
+                return;
+            }
+
+            UpdateMainDisplay(); // Initial display (renamed from DisplayCommands for clarity)
 
             while (true)
             {
-                ConsoleKeyInfo keyInfo = Console.ReadKey(true);
-                HandleKeyPress(keyInfo);
+                if (Console.KeyAvailable)
+                {
+                    ConsoleKeyInfo keyInfo = Console.ReadKey(true);
+                    HandleKeyPress(keyInfo);
+                }
+
+                if (_showMusicBar && _player != null && (_player.IsPlaying || _player.IsPaused))
+                {
+                    DisplayMusicBar();
+                }
+                Thread.Sleep(100); 
             }
         }
 
-        static void LoadMusicFolders()
+        static void LoadConfiguredMusicFolders()
         {
-            try
+            string configFile = "MusicFoldersLocation.txt";
+            if (File.Exists(configFile))
             {
-                string configFile = "MusicFoldersLocation.txt";
-                if (File.Exists(configFile))
+                try
                 {
-                    string[] lines = File.ReadAllLines(configFile);
-                    musicFolders.AddRange(lines);
+                    _configuredMusicFolders.AddRange(File.ReadAllLines(configFile).Where(line => !string.IsNullOrWhiteSpace(line) && Directory.Exists(line.Trim())).Select(line => line.Trim()));
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error reading {configFile}: {ex.Message}");
+                }
+            }
+        }
+        static List<string> ChooseMusicFoldersFromConfig()
+        {
+            Console.Clear(); 
+            if (!_configuredMusicFolders.Any()) {
+                Console.WriteLine("No valid folders found in MusicFoldersLocation.txt to choose from.");
+                Console.WriteLine("Please add folder paths to MusicFoldersLocation.txt, one per line.");
+                Console.WriteLine("Press any key to exit.");
+                Console.ReadKey();
+                Environment.Exit(0);
+            }
+
+            Console.WriteLine("\nChoose music folder(s) to load:");
+            for (int i = 0; i < _configuredMusicFolders.Count; i++)
+            {
+                Console.WriteLine($"{i + 1}. {_configuredMusicFolders[i]}");
+            }
+            Console.WriteLine($"{_configuredMusicFolders.Count + 1}. All Configured Folders");
+            Console.WriteLine("0. Exit");
+
+            List<string> selectedFolders = new List<string>();
+            bool validInput = false;
+            while (!validInput)
+            {
+                Console.Write($"Enter your choice (use numbers to select which folder to play or {_configuredMusicFolders.Count + 1} for All, or 0 to exit): ");
+                string input = Console.ReadLine();
+
+                if (input == "0") Environment.Exit(0);
+
+                var parts = input.Split(',').Select(p => p.Trim()).ToList();
+                List<string> tempSelected = new List<string>();
+                bool allPartsValidThisAttempt = true;
+
+                foreach (var part in parts)
+                {
+                    if (int.TryParse(part, out int choiceIndex))
+                    {
+                        if (choiceIndex > 0 && choiceIndex <= _configuredMusicFolders.Count)
+                        {
+                            tempSelected.Add(_configuredMusicFolders[choiceIndex - 1]);
+                        }
+                        else if (choiceIndex == _configuredMusicFolders.Count + 1)
+                        {
+                            tempSelected.AddRange(_configuredMusicFolders); 
+                            break;
+                        }
+                        else
+                        {
+                            allPartsValidThisAttempt = false; break;
+                        }
+                    }
+                    else
+                    {
+                        allPartsValidThisAttempt = false; break;
+                    }
+                }
+
+                if (allPartsValidThisAttempt && tempSelected.Any())
+                {
+                    selectedFolders = tempSelected.Distinct().ToList();
+                    validInput = true;
                 }
                 else
                 {
-                    Console.WriteLine("No music folders configured.");
-                    Console.WriteLine("Closing");
-                    Thread.Sleep(1000);
-                    Console.Write(".");
-                    Thread.Sleep(1000);
-                    Console.Write(".");
-                    Thread.Sleep(1000);
-                    Console.Write(".");
-                    Thread.Sleep(100);
-                    Environment.Exit(0);
-                }
-
-                foreach (string folder in musicFolders)
-                {
-                    string[] files = Directory.GetFiles(folder, "*.mp3")
-                                             .Concat(Directory.GetFiles(folder, "*.wav"))
-                                             .ToArray();
-                    musicFiles.AddRange(files);
+                    Console.WriteLine("Invalid choice. Please try again.");
                 }
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine("An error occurred while loading music folders: " + ex.Message);
-                Environment.Exit(0);
-            }
+            Console.Clear(); 
+            return selectedFolders;
         }
 
-        static void ChooseMusicFolder()
+        // RENAMED and Overhauled DisplayCommands to UpdateMainDisplay
+        static void UpdateMainDisplay()
         {
-            Console.WriteLine("Choose a music folder:");
-            for (int i = 0; i < musicFolders.Count; i++)
-            {
-                Console.WriteLine($"{i + 1}. {musicFolders[i]}");
-            }
-            Console.WriteLine($"{musicFolders.Count + 1}. All Folders");
+            Console.SetCursorPosition(0, 0); 
 
-            int choice = GetChoice(musicFolders.Count + 1);
-            if (choice <= musicFolders.Count)
+            if (!_showMusicBar)
             {
-                string selectedFolder = musicFolders[choice - 1];
-                musicFiles = Directory.GetFiles(selectedFolder, "*.mp3")
-                                     .Concat(Directory.GetFiles(selectedFolder, "*.wav"))
-                                     .Concat(Directory.GetFiles(selectedFolder, "*.mid"))
-                                     .ToList();
+                Console.Clear(); 
+            }
+            else
+            {
+                // If music bar is on, clear a fixed large enough area for main content
+                for (int i = 0; i < MaxMainContentLines; i++)
+                {
+                    if (Console.WindowHeight > i)
+                    {
+                        Console.SetCursorPosition(0, i);
+                        Console.Write(new string(' ', Console.WindowWidth > 0 ? Console.WindowWidth - 1 : 0));
+                    } else {
+                        break;
+                    }
+                }
+                Console.SetCursorPosition(0, 0); 
             }
 
-            if (musicFiles.Count == 0)
+            Console.WriteLine("--- AwoMusicPlayer ---");
+
+            if (_showSongDetailsView)
             {
-                Console.WriteLine("No music files found in the selected folder(s).");
-                Console.WriteLine("Closing");
-                Thread.Sleep(1000);
-                Console.Write(".");
-                Thread.Sleep(1000);
-                Console.Write(".");
-                Thread.Sleep(1000);
-                Console.Write(".");
-                Thread.Sleep(100);
-                Environment.Exit(0);
+                DisplaySongDetails();
             }
+            else // Show commands and potentially full song name
+            {
+                
+                
+                
+                Console.WriteLine("Controls:");
+                Console.WriteLine("  R         - Play a Random song");
+                Console.WriteLine("  Spacebar  - Pause/Resume");
+                Console.WriteLine("  L         - Toggle Loop current song");
+                Console.WriteLine("  RightArrow- Next song");
+                Console.WriteLine("  LeftArrow - Previous song");
+                Console.WriteLine("  UpArrow   - Volume Up");
+                Console.WriteLine("  DownArrow - Volume Down");
+                Console.WriteLine("  1 (Num)   - Skip Forward 10s");
+                Console.WriteLine("  2 (Num)   - Rewind 10s");
+                Console.WriteLine("  N         - Search for a song by name");
+                Console.WriteLine("  Z         - Toggle Music Bar");
+                Console.WriteLine("  F         - Full Filename");
+                Console.WriteLine("  D         - Song Details");
+                Console.WriteLine("  Esc       - Exit Player");
+                Console.WriteLine("----------------------");
+                
+                if (_player != null)
+                {
+                    string volInfo = $"Vol:{_player.Volume}%";
+                    string loopInfo = _player.IsLoopEnabled ? "Loop:On" : "Loop:Off";
+                    string playStatus = _player.IsPaused ? "Paused" : (_player.IsPlaying ? "Playing" : "Stopped");
+                    string songInfoForStatus = "";
+                    if (!_showFullSongName && !_showSongDetailsView) { // Show truncated song name only if no other dedicated display
+                        songInfoForStatus = _player.CurrentSongName.Ellipsis(Console.WindowWidth > 70 ? 20 : 5) + " | ";
+                    }
+                    string statusLine = $"{songInfoForStatus}{volInfo} | {loopInfo} | {playStatus}";
+                    Console.WriteLine(statusLine.Ellipsis(Console.WindowWidth > 1 ? Console.WindowWidth - 1 : 0));
+                }
+                else
+                {
+                    Console.WriteLine("Player not fully initialized.");
+                }
+                
+                Console.WriteLine("----------------------");
+                if (_showFullSongName && _player != null && !string.IsNullOrEmpty(_player.CurrentSongFilePath))
+                {
+                    Console.WriteLine($"Now Playing: {_player.CurrentSongName}".Ellipsis(Console.WindowWidth > 1 ? Console.WindowWidth -1 : 0));
+                    Console.WriteLine("----------------------");
+                }
+            }
+
+            // At the end of UpdateMainDisplay()
+            try
+            {
+                // Attempt to move cursor below the block of text just written,
+                // but above the music bar if it's active.
+                int lastLineOfContent = Console.CursorTop; // Get current line after all WriteLine calls
+                int targetCursorLine = lastLineOfContent;
+
+                if (_showMusicBar && targetCursorLine >= Console.WindowHeight - 1) {
+                    // If we'd write on or below music bar line, move cursor just above music bar
+                    targetCursorLine = Math.Max(0, Console.WindowHeight - 2);
+                } else if (targetCursorLine >= Console.WindowHeight) {
+                    // If cursor is beyond window height (e.g. after clearing a tall console)
+                    // bring it to the last visible line or just above bar
+                    targetCursorLine = _showMusicBar ? Math.Max(0, Console.WindowHeight - 2) : Math.Max(0, Console.WindowHeight -1);
+                }
+
+
+                if (Console.WindowHeight > targetCursorLine && targetCursorLine >=0) { // Ensure target is valid
+                    Console.SetCursorPosition(0, targetCursorLine);
+                }
+                // If console is very short, cursor might end up on the last printed line.
+            } catch {} // Ignore cursor setting errors
+        }
+
+        // NEW Method to display song details
+        static void DisplaySongDetails()
+        {
+            Console.WriteLine("--- Song Details ---");
+            if (_player != null && !string.IsNullOrEmpty(_player.CurrentSongFilePath)) // Use new property
+            {
+                Console.WriteLine($"File:     {_player.CurrentSongName.Ellipsis(Console.WindowWidth - 12)}");
+                Console.WriteLine($"Path:     {_player.CurrentSongFilePath.Ellipsis(Console.WindowWidth - 12)}"); // Use new property
+                Console.WriteLine($"Duration: {_player.TotalSongTime:mm\\:ss}");
+
+                NAudio.Wave.WaveFormat wf = _player.GetCurrentWaveFormat(); // Use new method
+                if (wf != null)
+                {
+                    Console.WriteLine($"Format:   {wf.Encoding}, {wf.SampleRate}Hz, {wf.Channels}ch, {wf.BitsPerSample}-bit");
+                }
+                else
+                {
+                    Console.WriteLine("Format:   N/A");
+                }
+                Console.WriteLine("Artist:   (metadata not implemented)"); 
+                Console.WriteLine("Album:    (metadata not implemented)"); 
+                Console.WriteLine("----------------------");
+                Console.WriteLine("Press 'D' to hide Details, or other command keys.");
+            }
+            else
+            {
+                Console.WriteLine("No song currently loaded or playing.");
+                Console.WriteLine("----------------------");
+                Console.WriteLine("Press 'D' to hide Details, or other command keys.");
+            }
+            Console.WriteLine("----------------------");
         }
 
 
         static void HandleKeyPress(ConsoleKeyInfo keyInfo)
         {
-            allowAutoplay = !(keyInfo.Key == ConsoleKey.R ||
-                              keyInfo.Key == ConsoleKey.RightArrow ||
-                              keyInfo.Key == ConsoleKey.LeftArrow);
+            if (_player == null) return; 
 
-            isSearcherActive = (keyInfo.Key == ConsoleKey.N);
+            bool requiresScreenRefresh = true; 
 
             switch (keyInfo.Key)
             {
-                case ConsoleKey.R:
-                    PlayRandomSong();
+                case ConsoleKey.R: _player.PlayRandom(); break;
+                case ConsoleKey.Spacebar: _player.TogglePause(); break;
+                case ConsoleKey.L: _player.ToggleLoop(); break;
+                case ConsoleKey.RightArrow: _player.PlayNext(); break;
+                case ConsoleKey.LeftArrow: _player.PlayPrevious(); break;
+                case ConsoleKey.UpArrow: _player.Volume += 10; break;
+                case ConsoleKey.DownArrow: _player.Volume -= 10; break;
+                case ConsoleKey.D1: case ConsoleKey.NumPad1:
+                    _player.SkipForward(); break;
+                case ConsoleKey.D2: case ConsoleKey.NumPad2:
+                    _player.Rewind(); break;
+                
+                // ADDED: Cases for F and D keys
+                case ConsoleKey.F: 
+                    _showFullSongName = !_showFullSongName;
+                    if (_showFullSongName) _showSongDetailsView = false; // Mutually exclusive with details for clarity
+                    break; 
+                case ConsoleKey.D:
+                    _showSongDetailsView = !_showSongDetailsView;
+                    if (_showSongDetailsView) _showFullSongName = false; // Mutually exclusive with full name
                     break;
-                case ConsoleKey.L:
-                    ToggleLoop();
-                    break;
-                case ConsoleKey.Spacebar:
-                    TogglePause();
-                    break;
-                case ConsoleKey.RightArrow:
-                    PlayNextSong();
-                    break;
-                case ConsoleKey.LeftArrow:
-                    PlayPreviousSong();
-                    break;
-                case ConsoleKey.UpArrow:
-                    IncreaseVolume();
-                    break;
-                case ConsoleKey.DownArrow:
-                    DecreaseVolume();
-                    break;
-                case ConsoleKey.D1:
-                    SkipForward();
-                    break;
-                case ConsoleKey.D2:
-                    Rewind();
-                    break;
+
                 case ConsoleKey.N:
-                    SearchByName();
-                    break;
+                    PerformSearch(); 
+                    UpdateMainDisplay(); 
+                    requiresScreenRefresh = true; 
+                    break; 
                 case ConsoleKey.Z:
-                    ToggleMusicBar();
+                    _showMusicBar = !_showMusicBar;
+                    if (!_showMusicBar) ClearMusicBarLine(); 
+                    UpdateMainDisplay(); 
+                    requiresScreenRefresh = false; 
                     break;
                 case ConsoleKey.Escape:
-                    Environment.Exit(0);
+                    Console.WriteLine("Exiting player...");
+                    _player.Dispose(); Environment.Exit(0);
+                    requiresScreenRefresh = false; 
                     break;
+                default: 
+                    requiresScreenRefresh = false; break;
+            }
+
+            if (requiresScreenRefresh)
+            {
+                UpdateMainDisplay(); // Use the new name
             }
         }
 
-        static void AutoplayNextSong()
+        static void PerformSearch()
         {
-            if (allowAutoplay && !isSearcherActive && !string.IsNullOrEmpty(currentSong))
-            {
-                SendKeys.SendWait("{Right}"); // Simulate pressing the right arrow key
+            // 1. Save current view state (which view was active)
+            bool wasShowingDetailsView = _showSongDetailsView; // CORRECTED VARIABLE NAME
+            bool wasShowingFullSongName = _showFullSongName;   // CORRECTED VARIABLE NAME
+
+            // 2. Prepare screen for search: Clear the main content area.
+            // The music bar (if active) will remain because we only clear above it.
+            Console.SetCursorPosition(0, 0);
+            if (!_showMusicBar) {
+                Console.Clear(); // Full clear if no music bar
+            } else {
+                // Clear everything above the music bar line
+                for (int i = 0; i < Console.WindowHeight - 1; i++) { // -1 to spare the music bar line
+                    if (Console.WindowHeight > i) { // Check if console is tall enough
+                        Console.SetCursorPosition(0, i);
+                        Console.Write(new string(' ', Console.WindowWidth > 0 ? Console.WindowWidth - 1 : 0));
+                    } else {
+                        break; // Stop if console height is less
+                    }
+                }
+                Console.SetCursorPosition(0, 0); // Reset cursor to top for search UI
             }
-        }
 
+            // 3. Display Search UI
+            Console.WriteLine("--- Search Song ---");
+            // Console.WriteLine("(Press Esc to cancel search - Note: Basic ReadLine used)"); // Optional: reminder about Esc
+            Console.Write("Enter song name to search: ");
 
+            // 4. Get search query
+            string query = Console.ReadLine(); 
 
+            if (string.IsNullOrWhiteSpace(query)) { // Handle empty input as cancellation or no search
+                Console.WriteLine("\nSearch cancelled or empty input."); Thread.Sleep(1000);
+                 _showSongDetailsView = wasShowingDetailsView;  // CORRECTED: Restore original state
+                 _showFullSongName = wasShowingFullSongName;    // CORRECTED: Restore original state
+                return; // UpdateMainDisplay will be called by HandleKeyPress
+            }
 
-        static void PlayRandomSong()
-        {
-            Random random = new Random();
-            int randomIndex = random.Next(0, musicFiles.Count);
-            currentSongPosition = randomIndex;
-            PlaySong(musicFiles[randomIndex]);
-        }
+            // Optional: Clear the search prompt lines if desired, though UpdateMainDisplay will handle it
+            try {
+                if(Console.CursorTop > 0) { 
+                    Console.SetCursorPosition(0, Console.CursorTop -1 ); 
+                    Console.Write(new string(' ', Console.WindowWidth > 0 ? Console.WindowWidth -1:0)); 
+                    if (Console.CursorTop > 0) { // Check again if we can go up one more line for the "--- Search Song ---"
+                         Console.SetCursorPosition(0, Console.CursorTop -1);
+                         Console.Write(new string(' ', Console.WindowWidth > 0 ? Console.WindowWidth -1:0));
+                    }
+                    Console.SetCursorPosition(0, Console.CursorTop > 0 ? Console.CursorTop : 0); // Position for results, ensuring not negative
+                }
+            } catch {}
 
-        static void TogglePause()
-        {
-            if (!string.IsNullOrEmpty(currentSong))
+            var results = _player.SearchSongs(query);
+
+            if (!results.Any())
             {
-                if (isPaused)
+                Console.WriteLine("\nNo songs found matching your query.");
+            }
+            else
+            {
+                Console.WriteLine("\nMatching songs:");
+                for (int i = 0; i < results.Count; i++)
                 {
-                    Console.WriteLine("Resumed playback.");
-                    isPaused = false;
-                    ResumeSong();
+                    Console.WriteLine($"{i + 1}. {results[i].Name.Ellipsis(Console.WindowWidth - 6)}");
+                }
+
+                Console.Write("\nSelect a song number to play (or 0/Enter to cancel): ");
+                string choiceInput = Console.ReadLine();
+                if (int.TryParse(choiceInput, out int choice) && choice > 0 && choice <= results.Count)
+                {
+                    _player.Play(results[choice - 1].Index);
                 }
                 else
                 {
-                    Console.WriteLine("Paused playback.");
-                    isPaused = true;
-                    PauseSong();
+                    Console.WriteLine("Search selection cancelled or invalid.");
                 }
             }
-        }
 
-        static void PlayNextSong()
+            Console.WriteLine("\nPress any key to return to the main view...");
+            Console.ReadKey(true); 
+
+            // 5. Restore the view state flags.
+            _showSongDetailsView = wasShowingDetailsView;  // CORRECTED VARIABLE NAME
+            _showFullSongName = wasShowingFullSongName;    // CORRECTED VARIABLE NAME
+            // UpdateMainDisplay will be called by HandleKeyPress after this method returns
+        }
+        static void ClearMusicBarLine()
         {
-            if (!string.IsNullOrEmpty(currentSong))
+            if (Console.WindowHeight <= 0) return;
+            int barLine = Console.WindowHeight - 1;
+            if (barLine < 0) barLine = 0;
+
+            int originalCursorTop = Console.CursorTop;
+            int originalCursorLeft = Console.CursorLeft;
+            bool canRestoreCursor = originalCursorTop != barLine || originalCursorLeft != 0;
+
+            try
             {
-                currentSongPosition++;
-                if (currentSongPosition >= musicFiles.Count)
+                Console.SetCursorPosition(0, barLine);
+                Console.Write(new string(' ', Console.WindowWidth > 0 ? Console.WindowWidth - 1 : 0));
+
+                if (canRestoreCursor)
                 {
-                    currentSongPosition = 0;
+                    Console.SetCursorPosition(originalCursorLeft, originalCursorTop);
                 }
-                PlaySong(musicFiles[currentSongPosition]);
             }
+            catch (Exception) { /* Ignore console errors */ }
         }
 
-        static void PlayPreviousSong()
+
+        static void DisplayMusicBar()
         {
-            if (!string.IsNullOrEmpty(currentSong))
+            if (Console.WindowHeight <= 0 || _player == null) return;
+
+            int barLine = Console.WindowHeight - 1;
+            if (barLine < 0) barLine = 0; 
+
+            // Avoid drawing over main content if console is extremely short
+            if (barLine < MaxMainContentLines && barLine != 0) { // if barLine is 0, it's the only line, so draw.
+                // Check if it would overlap where UpdateMainDisplay usually prints
+                // This threshold is a heuristic.
+                if (barLine < 5) { /* allow if console is super tiny, like 1-4 lines */ }
+                else return; 
+            }
+
+            int originalCursorTop = Console.CursorTop;
+            int originalCursorLeft = Console.CursorLeft;
+            bool cursorCanBeRestored = (originalCursorTop != barLine || originalCursorLeft != 0);
+
+            try
             {
-                currentSongPosition--;
-                if (currentSongPosition < 0)
+                Console.SetCursorPosition(0, barLine);
+                Console.Write(new string(' ', Console.WindowWidth > 0 ? Console.WindowWidth - 1 : 0));
+                Console.SetCursorPosition(0, barLine); 
+
+                TimeSpan current = _player.CurrentSongTime;
+                TimeSpan total = _player.TotalSongTime;
+                double progressPercent = 0;
+                if (total > TimeSpan.Zero && total >= current && current >= TimeSpan.Zero)
                 {
-                    Console.WriteLine("Cannot be done. This is the first song that you play.");
-                    currentSongPosition = 0;
-                    return;
+                    progressPercent = current.TotalSeconds / total.TotalSeconds;
                 }
-                PlaySong(musicFiles[currentSongPosition]);
-            }
-        }
+                progressPercent = Math.Max(0, Math.Min(1, progressPercent)); 
 
-        static void IncreaseVolume()
-        {
-            if (currentVolume < 100)
-            {
-                currentVolume += 10;
-                Console.WriteLine($"Volume increased to {currentVolume}%");
-                AdjustVolume();
-            }
-            else
-            {
-                Console.WriteLine("Volume is already at maximum.");
-            }
-        }
+                int actualProgressBarWidth = 50; // Increased from 30 as song name is removed
 
-        static void DecreaseVolume()
-        {
-            if (currentVolume > 0)
-            {
-                currentVolume -= 10;
-                Console.WriteLine($"Volume decreased to {currentVolume}%");
-                AdjustVolume();
-            }
-            else
-            {
-                Console.WriteLine("Volume is already at minimum.");
-            }
-        }
+                // Song name is removed from here
+                string timePart = $"{current:mm\\:ss}/{total:mm\\:ss}".PadRight(12);
+                string statusPart = (_player.IsPaused ? "Paused" : "Playing").PadRight(8);
+                string volPart = $"Vol:{_player.Volume}%".PadRight(9);
+                string loopPart = (_player.IsLoopEnabled ? "Loop:On" : "Loop:Off").PadRight(9);
 
-        static void SkipForward()
-        {
-            if (waveOutDevice != null && waveOutDevice.PlaybackState == PlaybackState.Playing)
-            {
-                TimeSpan skipAmount = TimeSpan.FromSeconds(10); // Skip forward by 10 seconds
+                int filledBarChars = (int)(progressPercent * actualProgressBarWidth);
+                string barItself = $"[{new string('=', filledBarChars)}{new string(' ', actualProgressBarWidth - filledBarChars)}]";
 
-                if (waveOutDevice.PlaybackState == PlaybackState.Playing && audioFileReader != null)
+                // REMOVED songNamePart from this string
+                string fullBarString = $"{timePart}|{barItself}|{statusPart}|{volPart}|{loopPart}";
+
+                Console.Write(fullBarString.Ellipsis(Console.WindowWidth > 0 ? Console.WindowWidth - 1 : 0));
+
+                if (cursorCanBeRestored)
                 {
-                    var currentPosition = audioFileReader.CurrentTime;
-                    var newPosition = currentPosition + skipAmount;
-                    if (newPosition < audioFileReader.TotalTime)
-                    {
-                        waveOutDevice.Pause();
-                        audioFileReader.CurrentTime = newPosition;
-                        waveOutDevice.Play();
-                    }
-                    else
-                    {
-                        PlayNextSong(); // Skip to the next song if skip amount exceeds song length
-                    }
+                    Console.SetCursorPosition(originalCursorLeft, originalCursorTop);
                 }
             }
+            catch (Exception) { /* Silently ignore console drawing errors */ }
         }
 
-        static void Rewind()
+        static void PauseBeforeExit(int milliseconds = 2000)
         {
-            if (waveOutDevice != null && waveOutDevice.PlaybackState == PlaybackState.Playing)
-            {
-                TimeSpan rewindAmount = TimeSpan.FromSeconds(10); // Rewind by 10 seconds
-
-                if (waveOutDevice.PlaybackState == PlaybackState.Playing && audioFileReader != null)
-                {
-                    var currentPosition = audioFileReader.CurrentTime;
-                    var newPosition = currentPosition - rewindAmount;
-                    if (newPosition >= TimeSpan.Zero)
-                    {
-                        waveOutDevice.Pause();
-                        audioFileReader.CurrentTime = newPosition;
-                        waveOutDevice.Play();
-                    }
-                    else
-                    {
-                        PlayPreviousSong(); // Rewind to the previous song if position goes before the start
-                    }
-                }
-            }
-        }
-
-        static void ToggleLoop()
-        {
-            isLoopEnabled = !isLoopEnabled;
-            Console.WriteLine(isLoopEnabled ? "Loop is enabled." : "Loop is disabled.");
-        }
-
-        static void SearchByName()
-        {
-            Console.Write("Enter the name or letters of the song: ");
-            string searchQuery = Console.ReadLine().ToLower();
-
-            var matchingSongs = musicFiles.Where(song => Path.GetFileName(song).ToLower().Contains(searchQuery)).ToList();
-
-            isSearcherActive = true;
-
-            if (matchingSongs.Count == 0)
-            {
-                Console.WriteLine("No matching songs found.");
-                return;
-            }
-
-            Console.WriteLine("Matching songs:");
-            for (int i = 0; i < matchingSongs.Count; i++)
-            {
-                Console.WriteLine($"{i + 1}. {Path.GetFileName(matchingSongs[i])}");
-            }
-
-            Console.Write("Select a song to play by entering its number: ");
-            int choice = GetChoice(matchingSongs.Count);
-
-            currentSongPosition = musicFiles.IndexOf(matchingSongs[choice - 1]);
-            PlaySong(matchingSongs[choice - 1]);
-        }
-
-
-        static void ToggleMusicBar()
-        {
-            showMusicBar = !showMusicBar;
-        }
-
-        static SoundPlayer soundPlayer; // Declare soundPlayer as a class-level variable
-
-        static int GetChoice(int maxChoice)
-        {
-            int choice;
-            while (!int.TryParse(Console.ReadLine(), out choice) || choice < 1 || choice > maxChoice)
-            {
-                Console.Write($"Invalid input. Please enter a number between 1 and {maxChoice}: ");
-            }
-            return choice;
-        }
-
-        static void PlaySong(string filePath)
-        {
-            StopSong();
-
-            currentSong = Path.GetFileName(filePath);
-            Console.WriteLine($"Now playing: {currentSong}");
-
-            audioFileReader = new AudioFileReader(filePath);
-            waveOutDevice = new WaveOutEvent();
-            waveOutDevice.Init(audioFileReader);
-
-            waveOutDevice.PlaybackStopped += (sender, e) =>
-            {
-                if (e.Exception == null) // Check if playback stopped without an exception
-                {
-                    if (isLoopEnabled)
-                    {
-                        audioFileReader.Position = 0; // Rewind the song to the beginning for looping
-                        waveOutDevice.Play(); // Continue playing the song
-                    }
-                    else
-                    {
-                        AutoplayNextSong(); // Trigger autoplay when playback stops
-                    }
-                }
-            };
-
-            waveOutDevice.Play();
-        }
-
-
-        static void WaveOutDevice_PlaybackStopped(object sender, StoppedEventArgs e)
-        {
-            if (e.Exception == null) // Check if playback stopped without an exception
-            {
-                AutoplayNextSong(); // Trigger autoplay when playback stops
-            }
-        }
-
-
-        static IWavePlayer waveOutDevice;
-        static AudioFileReader audioFileReader;
-        static void ResumeSong()
-        {
-            if (!string.IsNullOrEmpty(currentSong) && isPaused)
-            {
-                Console.WriteLine("Resumed playback.");
-                isPaused = false;
-
-                if (waveOutDevice != null && waveOutDevice.PlaybackState == PlaybackState.Paused)
-                {
-                    waveOutDevice.Play(); // Resume playback using the existing WaveOutEvent instance
-                }
-                else
-                {
-                    Console.WriteLine("No song is currently paused.");
-                }
-            }
-        }
-
-
-        static void PauseSong()
-        {
-            if (waveOutDevice != null && waveOutDevice.PlaybackState == PlaybackState.Playing)
-            {
-                waveOutDevice.Pause(); // Pause playback without disposing
-            }
-            else
-            {
-                Console.WriteLine("No song is currently playing.");
-            }
-        }
-
-
-        static void AdjustVolume()
-        {
-            if (waveOutDevice != null)
-            {
-                waveOutDevice.Volume = currentVolume / 100.0f; // Adjust volume
-            }
-        }
-
-        static void StopSong()
-        {
-            if (waveOutDevice != null)
-            {
-                waveOutDevice.Stop();
-                waveOutDevice.Dispose();
-                waveOutDevice = null;
-            }
+            Console.WriteLine($"Exiting in {milliseconds/1000} seconds...");
+            Thread.Sleep(milliseconds);
         }
     }
 }
